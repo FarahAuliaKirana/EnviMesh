@@ -124,7 +124,13 @@ fun EnviMeshApp(vm: EnviMeshViewModel = viewModel()) {
                     },
                 )
             }
-            composable(Routes.MAP) { MapScreen(state) }
+            composable(Routes.MAP) {
+                MapScreen(
+                    state = state,
+                    onMyLocation = { lat, lon -> vm.onMyLocation(lat, lon) },
+                    onReshuffle = vm::reshuffleNodes,
+                )
+            }
             composable(Routes.ALERT) {
                 AlertScreen(
                     state = state,

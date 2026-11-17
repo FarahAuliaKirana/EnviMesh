@@ -13,6 +13,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import com.envimesh.app.data.Simulation
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 
 data class UiState(
     val scanning: Boolean = false,
@@ -23,6 +26,7 @@ data class UiState(
     val config: NodeConfig = NodeConfig(nodeId = "NODE-01", wakeIntervalMin = 30, waterThresholdCm = 40),
     val alert: IncidentAlert? = null,
     val mapFocus: Pair<Double, Double>? = null,
+    val myLocation: Pair<Double, Double>? = null,
 )
 
 class EnviMeshViewModel(
@@ -63,5 +67,42 @@ class EnviMeshViewModel(
 
     fun focusMap(latitude: Double, longitude: Double) {
         _state.update { it.copy(mapFocus = latitude to longitude) }
+    }
+
+    fun onMyLocation(latitude: Double, longitude: Double, reshuffle: Boolean = false) {
+        val current = _state.value
+        if (current.myLocation != null && !reshuffle) {
+            _state.update { it.copy(myLocation = latitude to longitude) }
+            return
+        }
+        val nodes = Simulation.nodesAround(latitude, longitude)
+        val driest = nodes
+            .filter { it.online && (it.waterLevelCm ?: 0) >= current.config.waterThresholdCm }
+            .maxByOrNull { it.waterLevelCm ?: 0 }
+        val alert = driest?.let { n ->
+            IncidentAlert(
+                nodeId = n.id,
+                latitude = n.latitude,
+                longitude = n.longitude,
+                waterLevelCm = n.waterLevelCm ?: 0,
+                receivedAt = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm")),
+                distanceKm = Math.round(
+                    Simulation.distanceKm(latitude, longitude, n.latitude, n.longitude) * 10
+                ) / 10.0,
+            )
+        }
+        _state.update {
+            it.copy(
+                myLocation = latitude to longitude,
+                nodes = nodes,
+                alert = alert ?: it.alert,
+                mapFocus = latitude to longitude,
+            )
+        }
+    }
+
+    fun reshuffleNodes() {
+        val me = _state.value.myLocation ?: return
+        onMyLocation(me.first, me.second, reshuffle = true)
     }
 }

@@ -47,6 +47,8 @@ import com.envimesh.app.ui.components.StatusLegend
 import com.envimesh.app.ui.components.VSpace
 import com.envimesh.app.ui.components.color
 import com.envimesh.app.ui.components.label
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.text.style.TextOverflow
 
 /** Node list (App Inventor: Home). */
 @Composable
@@ -69,19 +71,31 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Column {
+                    Column(Modifier.weight(1f)) {
                         MutedText("Bluetooth")
                         Text(
                             "Connected via ${state.connectedDevice ?: "-"}",
                             fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    OutlinedButton(onClick = onSetup, shape = RoundedCornerShape(50)) { Text("Setup") }
+                    Spacer(Modifier.width(12.dp))
+                    OutlinedButton(
+                        onClick = onSetup,
+                        shape = RoundedCornerShape(50),
+                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+                    ) {
+                        Text("Setup", maxLines = 1, softWrap = false)
+                    }
                 }
             }
             VSpace(20)
             Text("Nodes", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             MutedText("Water level = depth below peat surface. Threshold: $threshold cm")
+            if (state.myLocation != null) {
+                MutedText("Simulated nodes placed around your current location.")
+            }
             VSpace(8)
             SectionCard {
                 state.nodes.forEachIndexed { i, node ->
@@ -133,10 +147,10 @@ fun MonitoringScreen(
             .verticalScroll(rememberScrollState())
     ) {
         ScreenHeader("Monitoring", onBack = onBack)
-        Column(Modifier.padding(horizontal = 20.dp)) {
+        Column(Modifier.padding(horizontal = 20.dp)) content@{
             if (node == null) {
                 MutedText("Node $nodeId not found.")
-                return@Column
+                return@content
             }
             val status = node.status(state.config.waterThresholdCm)
             Row(verticalAlignment = Alignment.CenterVertically) {

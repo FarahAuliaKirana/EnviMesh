@@ -46,43 +46,114 @@ import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
+import android.Manifest
+import android.annotation.SuppressLint
+import android.content.pm.PackageManager
+import android.location.LocationManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
+import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 
-/** Node and incident positions (App Inventor: Map). */
+/** Node and incident positions (App Inventor: Map), centred on the phone's real location. */
 @Composable
-fun MapScreen(state: UiState) {
+fun MapScreen(
+    state: UiState,
+    onMyLocation: (Double, Double) -> Unit = { _, _ -> },
+    onReshuffle: () -> Unit = {},
+) {
+    val context = LocalContext.current
+    val inPreview = LocalInspectionMode.current
+    var hasLocationPermission by remember { mutableStateOf(inPreview || isLocationGranted(context)) }
+    var asked by remember { mutableStateOf(false) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        asked = true
+        hasLocationPermission = result.values.any { it }
+    }
+    LaunchedEffect(Unit) {
+        if (!hasLocationPermission) {
+            permissionLauncher.launch(
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+            )
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("Map")
-        MutedText(
-            "Online map tiles for now. Offline tiles for the site are the next step.",
-            modifier = Modifier.padding(horizontal = 20.dp),
-        )
-        VSpace(8)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val status = when {
+                state.myLocation != null -> "Simulated nodes around your location"
+                !hasLocationPermission && asked -> "Location permission denied, showing sample area"
+                else -> "Finding your location..."
+            }
+            MutedText(status, modifier = Modifier.weight(1f))
+            if (state.myLocation != null) {
+                TextButton(onClick = onReshuffle) { Text("Randomize", maxLines = 1, softWrap = false) }
+            }
+        }
+        VSpace(4)
         val mapModifier = Modifier
             .weight(1f)
             .fillMaxWidth()
-        if (LocalInspectionMode.current) {
-            // Android Studio Preview cannot render the real map view; show a placeholder.
+        if (inPreview) {
             Box(
                 mapModifier.background(Color(0xFF2A3B33)),
                 contentAlignment = Alignment.Center,
             ) { MutedText("Map preview (runs on device/emulator)") }
         } else {
-            OsmMap(state, mapModifier)
+            OsmMap(state, hasLocationPermission, onMyLocation, mapModifier)
         }
         StatusLegend(Modifier.padding(vertical = 12.dp))
     }
 }
 
+private fun isLocationGranted(context: Context): Boolean =
+    ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+
+@SuppressLint("MissingPermission")
+private fun lastKnownLocation(context: Context): Pair<Double, Double>? = try {
+    val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER)
+        .mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }
+        .maxByOrNull { it.time }
+        ?.let { it.latitude to it.longitude }
+} catch (e: SecurityException) {
+    null
+}
+
 @Composable
-private fun OsmMap(state: UiState, modifier: Modifier) {
+private fun OsmMap(
+    state: UiState,
+    hasLocationPermission: Boolean,
+    onMyLocation: (Double, Double) -> Unit,
+    modifier: Modifier,
+) {
     val context = LocalContext.current
     val mapView = remember {
         MapView(context).apply {
             setTileSource(TileSourceFactory.MAPNIK)
             setMultiTouchControls(true)
-            controller.setZoom(14.0)
+            controller.setZoom(15.0)
         }
     }
+    val lastCenter = remember { arrayOfNulls<Pair<Double, Double>>(1) }
+
     DisposableEffect(Unit) {
         mapView.onResume()
         onDispose {
@@ -90,11 +161,32 @@ private fun OsmMap(state: UiState, modifier: Modifier) {
             mapView.onDetach()
         }
     }
+
+    DisposableEffect(hasLocationPermission) {
+        if (!hasLocationPermission) return@DisposableEffect onDispose { }
+        lastKnownLocation(context)?.let { (lat, lon) -> onMyLocation(lat, lon) }
+        val provider = GpsMyLocationProvider(context).apply {
+            addLocationSource(LocationManager.NETWORK_PROVIDER)
+        }
+        val overlay = MyLocationNewOverlay(provider, mapView).apply {
+            enableMyLocation()
+            runOnFirstFix {
+                val p = myLocation ?: return@runOnFirstFix
+                mapView.post { onMyLocation(p.latitude, p.longitude) }
+            }
+        }
+        mapView.overlays.add(overlay)
+        onDispose {
+            overlay.disableMyLocation()
+            mapView.overlays.remove(overlay)
+        }
+    }
+
     AndroidView(
         factory = { mapView },
         modifier = modifier,
         update = { map ->
-            map.overlays.clear()
+            map.overlays.removeAll { it is Marker }
             val threshold = state.config.waterThresholdCm
             state.nodes.forEach { node ->
                 val st = node.status(threshold)
@@ -114,8 +206,12 @@ private fun OsmMap(state: UiState, modifier: Modifier) {
                 })
             }
             val center = state.mapFocus
+                ?: state.myLocation
                 ?: state.nodes.firstOrNull()?.let { it.latitude to it.longitude }
-            center?.let { map.controller.setCenter(GeoPoint(it.first, it.second)) }
+            if (center != null && center != lastCenter[0]) {
+                map.controller.setCenter(GeoPoint(center.first, center.second))
+                lastCenter[0] = center
+            }
             map.invalidate()
         },
     )
@@ -137,11 +233,11 @@ fun AlertScreen(
             .verticalScroll(rememberScrollState())
     ) {
         ScreenHeader("Alert")
-        Column(Modifier.padding(horizontal = 20.dp)) {
+        Column(Modifier.padding(horizontal = 20.dp)) content@{
             val alert = state.alert
             if (alert == null) {
                 MutedText("No active alerts.")
-                return@Column
+                return@content
             }
             Text("Coordinates received", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = StatusBelow)
             MutedText("Sent by the operator through the mesh")

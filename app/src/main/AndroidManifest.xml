@@ -21,6 +21,7 @@
 
     <!-- BLE scan on Android 11 and older, and the phone's own position later -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <uses-feature
         android:name="android.hardware.bluetooth_le"
