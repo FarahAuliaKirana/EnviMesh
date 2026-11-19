@@ -1,10 +1,17 @@
 package com.envimesh.app.ui.screens
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
+import android.location.LocationManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -14,10 +21,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -46,18 +59,6 @@ import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
-import android.Manifest
-import android.annotation.SuppressLint
-import android.content.pm.PackageManager
-import android.location.LocationManager
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Row
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 
@@ -95,12 +96,13 @@ fun MapScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val status = when {
+                state.onlineMode -> "Live nodes from Supabase" + (state.lastSync?.let { " · $it" } ?: "")
                 state.myLocation != null -> "Simulated nodes around your location"
                 !hasLocationPermission && asked -> "Location permission denied, showing sample area"
                 else -> "Finding your location..."
             }
             MutedText(status, modifier = Modifier.weight(1f))
-            if (state.myLocation != null) {
+            if (!state.onlineMode && state.myLocation != null) {
                 TextButton(onClick = onReshuffle) { Text("Randomize", maxLines = 1, softWrap = false) }
             }
         }
@@ -109,6 +111,7 @@ fun MapScreen(
             .weight(1f)
             .fillMaxWidth()
         if (inPreview) {
+            // Android Studio Preview cannot render the real map view; show a placeholder.
             Box(
                 mapModifier.background(Color(0xFF2A3B33)),
                 contentAlignment = Alignment.Center,
@@ -122,10 +125,11 @@ fun MapScreen(
 
 private fun isLocationGranted(context: Context): Boolean =
     ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
-            PackageManager.PERMISSION_GRANTED ||
-            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
-            PackageManager.PERMISSION_GRANTED
+        PackageManager.PERMISSION_GRANTED ||
+        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+        PackageManager.PERMISSION_GRANTED
 
+/** Last position Android already knows, so the map does not wait for a fresh GPS fix. */
 @SuppressLint("MissingPermission")
 private fun lastKnownLocation(context: Context): Pair<Double, Double>? = try {
     val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
@@ -152,6 +156,7 @@ private fun OsmMap(
             controller.setZoom(15.0)
         }
     }
+    // Remembers the last centre we moved to, so the user can pan freely afterwards.
     val lastCenter = remember { arrayOfNulls<Pair<Double, Double>>(1) }
 
     DisposableEffect(Unit) {
@@ -162,6 +167,7 @@ private fun OsmMap(
         }
     }
 
+    // Blue "you are here" dot + first location fix.
     DisposableEffect(hasLocationPermission) {
         if (!hasLocationPermission) return@DisposableEffect onDispose { }
         lastKnownLocation(context)?.let { (lat, lon) -> onMyLocation(lat, lon) }
@@ -205,9 +211,9 @@ private fun OsmMap(
                     snippet = "Received ${a.receivedAt}"
                 })
             }
+            val firstNode = state.nodes.firstOrNull()?.let { it.latitude to it.longitude }
             val center = state.mapFocus
-                ?: state.myLocation
-                ?: state.nodes.firstOrNull()?.let { it.latitude to it.longitude }
+                ?: if (state.onlineMode) (firstNode ?: state.myLocation) else (state.myLocation ?: firstNode)
             if (center != null && center != lastCenter[0]) {
                 map.controller.setCenter(GeoPoint(center.first, center.second))
                 lastCenter[0] = center
@@ -239,8 +245,21 @@ fun AlertScreen(
                 MutedText("No active alerts.")
                 return@content
             }
-            Text("Coordinates received", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = StatusBelow)
-            MutedText("Sent by the operator through the mesh")
+            val title = when (alert.level) {
+                "danger" -> "Danger: water table too low"
+                "possible_fire" -> "Possible fire"
+                "sensor_error" -> "Sensor error"
+                else -> "Warning: water table dropping"
+            }
+            Text(title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = StatusBelow)
+            MutedText(
+                if (state.onlineMode) "Active alert from the server" + (if (state.activeAlertCount > 1) " (${state.activeAlertCount} active)" else "")
+                else "Sent by the operator through the mesh"
+            )
+            alert.message?.let {
+                VSpace(4)
+                Text(it, fontSize = 14.sp)
+            }
             VSpace(12)
             SectionCard {
                 InfoRow("Node", alert.nodeId)
@@ -278,10 +297,34 @@ fun AlertScreen(
 
 /** App and connection info (App Inventor: Settings). */
 @Composable
-fun SettingsScreen(state: UiState, onDisconnect: () -> Unit) {
+fun SettingsScreen(
+    state: UiState,
+    onDisconnect: () -> Unit,
+    onOnlineModeChange: (Boolean) -> Unit = {},
+) {
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("Settings")
         Column(Modifier.padding(horizontal = 20.dp)) {
+            SectionCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Online data (Supabase)", fontWeight = FontWeight.Medium)
+                        MutedText(
+                            when {
+                                !state.onlineAvailable -> "Add supabase.url and supabase.publishableKey to local.properties"
+                                state.onlineMode -> "Nodes and alerts come from the server"
+                                else -> "Off: random simulation on this phone"
+                            }
+                        )
+                    }
+                    Switch(
+                        checked = state.onlineMode,
+                        onCheckedChange = onOnlineModeChange,
+                        enabled = state.onlineAvailable,
+                    )
+                }
+            }
+            VSpace(16)
             SectionCard {
                 InfoRow("Connected device", state.connectedDevice ?: "-")
                 InfoRow("Language", "English")

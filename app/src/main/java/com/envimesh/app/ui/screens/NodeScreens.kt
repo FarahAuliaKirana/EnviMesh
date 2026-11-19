@@ -1,16 +1,21 @@
 package com.envimesh.app.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -23,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.envimesh.app.data.NodeConfig
@@ -47,8 +54,10 @@ import com.envimesh.app.ui.components.StatusLegend
 import com.envimesh.app.ui.components.VSpace
 import com.envimesh.app.ui.components.color
 import com.envimesh.app.ui.components.label
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.ui.text.style.TextOverflow
+import com.envimesh.app.ui.theme.StatusBelow
+import com.envimesh.app.ui.theme.StatusError
+import com.envimesh.app.ui.theme.StatusGood
+import com.envimesh.app.ui.theme.StatusOffline
 
 /** Node list (App Inventor: Home). */
 @Composable
@@ -56,6 +65,7 @@ fun HomeScreen(
     state: UiState,
     onSetup: () -> Unit,
     onOpenNode: (String) -> Unit,
+    onRefresh: () -> Unit = {},
 ) {
     val threshold = state.config.waterThresholdCm
     Column(
@@ -90,10 +100,12 @@ fun HomeScreen(
                     }
                 }
             }
-            VSpace(20)
+            VSpace(12)
+            DataSourceBar(state, onRefresh)
+            VSpace(16)
             Text("Nodes", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
             MutedText("Water level = depth below peat surface. Threshold: $threshold cm")
-            if (state.myLocation != null) {
+            if (!state.onlineMode && state.myLocation != null) {
                 MutedText("Simulated nodes placed around your current location.")
             }
             VSpace(8)
@@ -106,6 +118,40 @@ fun HomeScreen(
             VSpace(16)
             StatusLegend()
             VSpace(24)
+        }
+    }
+}
+
+/** Shows where the data comes from: Supabase (online) or local simulation. */
+@Composable
+private fun DataSourceBar(state: UiState, onRefresh: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val (dot, text) = when {
+            !state.onlineMode -> StatusOffline to "Offline simulation (random data on this phone)"
+            state.syncError != null -> StatusBelow to "Cannot reach server: ${state.syncError}"
+            state.lastSync == null -> StatusError to "Connecting to Supabase..."
+            else -> StatusGood to "Online · Supabase · updated ${state.lastSync}" +
+                if (state.activeAlertCount > 0) " · ${state.activeAlertCount} active alert(s)" else ""
+        }
+        Box(
+            Modifier
+                .size(8.dp)
+                .background(dot, CircleShape)
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text,
+            modifier = Modifier.weight(1f),
+            fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (state.onlineMode) {
+            TextButton(onClick = onRefresh) { Text("Refresh", maxLines = 1, softWrap = false) }
         }
     }
 }

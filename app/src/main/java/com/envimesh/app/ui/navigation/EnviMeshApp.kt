@@ -1,5 +1,10 @@
 package com.envimesh.app.ui.navigation
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
@@ -14,11 +19,14 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
@@ -27,6 +35,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.envimesh.app.ui.AlertNotifier
 import com.envimesh.app.ui.EnviMeshViewModel
 import com.envimesh.app.ui.screens.AlertScreen
 import com.envimesh.app.ui.screens.HomeScreen
@@ -66,6 +75,24 @@ fun EnviMeshApp(vm: EnviMeshViewModel = viewModel()) {
     val state by vm.state.collectAsState()
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
+    val context = LocalContext.current
+
+    // Android 13+: ask once for permission to show alert notifications.
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+    // New alerts from Supabase -> phone notification.
+    LaunchedEffect(vm) {
+        vm.newAlerts.collect { alert -> AlertNotifier.show(context, alert) }
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -98,6 +125,7 @@ fun EnviMeshApp(vm: EnviMeshViewModel = viewModel()) {
                     state = state,
                     onSetup = { nav.navigate(Routes.SETUP) },
                     onOpenNode = { id -> nav.navigate(Routes.monitoring(id)) },
+                    onRefresh = vm::syncNow,
                 )
             }
             composable(
@@ -144,6 +172,7 @@ fun EnviMeshApp(vm: EnviMeshViewModel = viewModel()) {
             composable(Routes.SETTINGS) {
                 SettingsScreen(
                     state = state,
+                    onOnlineModeChange = vm::setOnlineMode,
                     onDisconnect = {
                         vm.disconnect()
                         nav.navigate(Routes.SCAN) { popUpTo(0) { inclusive = true } }

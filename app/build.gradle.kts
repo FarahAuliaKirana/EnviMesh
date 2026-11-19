@@ -1,7 +1,18 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
+
+// Supabase settings live in local.properties (ignored by Git), e.g.
+//   supabase.url=https://xxxx.supabase.co
+//   supabase.publishableKey=sb_publishable_xxxx
+val localProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+fun localProp(key: String): String = localProps.getProperty(key, "").trim()
 
 android {
     namespace = "com.envimesh.app"
@@ -13,6 +24,9 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "0.1"
+
+        buildConfigField("String", "SUPABASE_URL", "\"${localProp("supabase.url")}\"")
+        buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"${localProp("supabase.publishableKey")}\"")
     }
 
     buildTypes {
@@ -30,6 +44,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         // Must match the Kotlin version in the root build.gradle.kts (1.9.24).

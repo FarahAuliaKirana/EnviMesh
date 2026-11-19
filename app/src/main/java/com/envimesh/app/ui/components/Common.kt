@@ -32,18 +32,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.envimesh.app.data.NodeStatus
 import com.envimesh.app.ui.theme.StatusBelow
+import com.envimesh.app.ui.theme.StatusError
 import com.envimesh.app.ui.theme.StatusGood
 import com.envimesh.app.ui.theme.StatusOffline
 
 fun NodeStatus.color(): Color = when (this) {
     NodeStatus.GOOD -> StatusGood
     NodeStatus.BELOW_THRESHOLD -> StatusBelow
+    NodeStatus.SENSOR_ERROR -> StatusError
     NodeStatus.OFFLINE -> StatusOffline
 }
 
 fun NodeStatus.label(): String = when (this) {
     NodeStatus.GOOD -> "Good"
     NodeStatus.BELOW_THRESHOLD -> "Below threshold"
+    NodeStatus.SENSOR_ERROR -> "Sensor error"
     NodeStatus.OFFLINE -> "Offline"
 }
 

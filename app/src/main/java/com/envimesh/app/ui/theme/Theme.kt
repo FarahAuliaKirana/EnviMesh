@@ -15,6 +15,7 @@ val EnviMuted = Color(0xFF9A9A9A)
 
 val StatusGood = Color(0xFF22C55E)
 val StatusBelow = Color(0xFFEF4444)
+val StatusError = Color(0xFFF59E0B)
 val StatusOffline = Color(0xFF8A8A8A)
 
 private val EnviColors = darkColorScheme(
