@@ -24,7 +24,6 @@ cukup kering untuk terbakar.
 - [Skenario demo](#skenario-demo)
 - [Keamanan](#keamanan)
 - [Roadmap](#roadmap)
-- [Tim](#tim)
 - [Referensi](#referensi)
 
 ---
